@@ -39,7 +39,7 @@ def usage_string():
 {0} [--comments] [--geotags]
 {2:{1}} [--stories] [--highlights] [--tagged] [--reels] [--igtv]
 {2:{1}} [--login YOUR-USERNAME] [--fast-update]
-{2:{1}} profile | "#hashtag" | %%location_id | :stories | :feed | :saved
+{2:{1}} profile | "#hashtag" | %%location_id | id:userid | :stories | :feed | :saved
 {0} --help""".format(argv0, len(argv0), '')
 
 
@@ -247,6 +247,9 @@ def _main(instaloader: Instaloader, targetlist: List[str],
                 elif re.match(r"^%[0-9]+$", target):
                     instaloader.download_location(location=target[1:], max_count=max_count, fast_update=fast_update,
                                                   post_filter=post_filter)
+                elif re.match(r"^id:[0-9]+$", target):
+                    profile = Profile.from_id(instaloader.context, int(target[3:]))
+                    profiles.add(profile)
                 elif target == ":feed":
                     instaloader.download_feed_posts(fast_update=fast_update, max_count=max_count,
                                                     post_filter=post_filter)
@@ -364,6 +367,8 @@ def main():
     g_targets.add_argument('_hashtag', nargs='*', metavar='"#hashtag"', help="Download #hashtag.")
     g_targets.add_argument('_location', nargs='*', metavar='%location_id',
                            help="Download %%location_id. Requires login.")
+    g_targets.add_argument('_userid', nargs='*', metavar='id:userid',
+                           help="Download profile by numeric user ID.")
     g_targets.add_argument('_feed', nargs='*', metavar=":feed",
                            help="Download pictures from your feed. Requires login.")
     g_targets.add_argument('_stories', nargs='*', metavar=":stories",

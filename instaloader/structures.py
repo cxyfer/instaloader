@@ -21,11 +21,13 @@ class PostSidecarNode(NamedTuple):
     is_video: bool
     display_url: str
     video_url: Optional[str]
+    id: Optional[str] = None
 
 
 PostSidecarNode.is_video.__doc__ = "Whether this node is a video."
 PostSidecarNode.display_url.__doc__ = "URL of image or video thumbnail."
 PostSidecarNode.video_url.__doc__ = "URL of video or None."
+PostSidecarNode.id.__doc__ = "ID (pk) of the sidecar item."
 
 
 class PostCommentAnswer(NamedTuple):
@@ -251,6 +253,7 @@ class Post:
     @staticmethod
     def _convert_iphone_carousel(iphone_node: Dict[str, Any], media_types: Dict[int, str]) -> Dict[str, Any]:
         fake_node = {
+            "id": str(iphone_node["pk"]) if "pk" in iphone_node else None,
             "display_url": iphone_node["image_versions2"]["candidates"][0]["url"],
             "is_video": media_types[iphone_node["media_type"]] == "GraphVideo",
         }
@@ -491,15 +494,22 @@ class Post:
                     node = edge['node']
                     is_video = node['is_video']
                     display_url = node['display_url']
-                    if not is_video and self._context.iphone_support and self._context.is_logged_in:
+                    sidecar_id = node.get('id')
+                    # Try to get pk from iphone_struct for all media types
+                    if self._context.iphone_support and self._context.is_logged_in:
                         try:
                             carousel_media = self._iphone_struct['carousel_media']
-                            orig_url = carousel_media[idx]['image_versions2']['candidates'][0]['url']
-                            display_url = re.sub(r'([?&])se=\d+&?', r'\1', orig_url).rstrip('&')
+                            if 'pk' in carousel_media[idx]:
+                                sidecar_id = str(carousel_media[idx]['pk'])
+                            # Fetch high quality URL only for images
+                            if not is_video:
+                                orig_url = carousel_media[idx]['image_versions2']['candidates'][0]['url']
+                                display_url = re.sub(r'([?&])se=\d+&?', r'\1', orig_url).rstrip('&')
                         except (InstaloaderException, KeyError, IndexError) as err:
                             self._context.error(f"Unable to fetch high quality image version of {self}: {err}")
                     yield PostSidecarNode(is_video=is_video, display_url=display_url,
-                                          video_url=node['video_url'] if is_video else None)
+                                          video_url=node['video_url'] if is_video else None,
+                                          id=sidecar_id)
 
     @property
     def caption(self) -> Optional[str]:
