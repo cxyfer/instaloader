@@ -899,8 +899,7 @@ class Profile:
     Also, this class implements == and is hashable.
     """
     def __init__(self, context: InstaloaderContext, node: Dict[str, Any]):
-        assert "username" in node
-        assert "id" in node or "pk" in node
+        assert 'username' in node
         self._context = context
         self._has_public_story: Optional[bool] = None
         self._node = node
@@ -920,13 +919,33 @@ class Profile:
         :param username: Username
         :raises: :class:`ProfileNotExistsException`
         """
-        data = context.doc_id_graphql_query("26347858941511777", {"hasQuery": True, "query": username})["data"]
-        if data:
-            for user in data["xdt_api__v1__fbsearch__non_profiled_serp"]["users"]:
-                if user["username"].lower() == username.lower():
-                    return cls(context, user)
+        for profile in TopSearchResults(context, username).get_profiles():
+            if profile.username.lower() == username.lower():
+                profile._obtain_metadata()
+                return profile
 
-        raise ProfileNotExistsException("Profile {} does not exist.".format(username))
+        variables = {
+            "data": {
+                "count":12,
+                "include_reel_media_seen_timestamp": False,
+                "include_relationship_info": True,
+                "latest_besties_reel_media": False,
+                "latest_reel_media": False
+            },
+            "username":username
+        }
+
+        data = context.doc_id_graphql_query('34579740524958711', variables)
+        try:
+            user_info = data["data"]["xdt_api__v1__feed__user_timeline_graphql_connection"]["edges"][0]["node"]["user"]
+            profile = cls(context, user_info)
+            profile._obtain_metadata()
+            return profile
+        except (KeyError, IndexError):
+            pass
+
+        raise ProfileNotExistsException("No profile found, the user may have blocked you (ID: " +
+                                        str(username) + ").")
 
     @classmethod
     def from_id(cls, context: InstaloaderContext, profile_id: int):
@@ -994,14 +1013,18 @@ class Profile:
         try:
             if not self._has_full_metadata:
                 user_id = self._node.get('id') or self._node.get('pk')
+                if not user_id:
+                    raise ProfileNotExistsException('Profile {} has no user ID.'.format(self.username))
                 variables = {
                     "id": str(user_id),
                     "render_surface": "PROFILE",
                     "__relay_internal__pv__PolarisCannesGuardianExperienceEnabledrelayprovider": True,
                     "__relay_internal__pv__PolarisCASB976ProfileEnabledrelayprovider": False,
                     "__relay_internal__pv__PolarisRepostsConsumptionEnabledrelayprovider": False,
+                    "__relay_internal__pv__PolarisWebSchoolsEnabledrelayprovider": False,
+                    "enable_integrity_filters": True,
                 }
-                data = self._context.doc_id_graphql_query('25980296051578533', variables)
+                data = self._context.doc_id_graphql_query('27937681195819736', variables)
                 if data is None:
                     raise QueryReturnedNotFoundException('GraphQL query returned None')
                 user_data = data.get('data', {}).get('user')
@@ -1009,7 +1032,7 @@ class Profile:
                     raise ProfileNotExistsException('Profile {} does not exist.'.format(self.username))
                 self._node = self._normalize_profile_data(user_data)
                 self._has_full_metadata = True
-        except (QueryReturnedNotFoundException, KeyError) as err:
+        except (QueryReturnedNotFoundException, KeyError, ConnectionException) as err:
             top_search_results = TopSearchResults(self._context, self.username)
             similar_profiles = [profile.username for profile in top_search_results.get_profiles()]
             if similar_profiles:
