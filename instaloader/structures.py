@@ -898,6 +898,7 @@ class Profile:
 
     Also, this class implements == and is hashable.
     """
+
     def __init__(self, context: InstaloaderContext, node: Dict[str, Any]):
         assert 'username' in node
         self._context = context
@@ -919,33 +920,18 @@ class Profile:
         :param username: Username
         :raises: :class:`ProfileNotExistsException`
         """
-        for profile in TopSearchResults(context, username).get_profiles():
-            if profile.username.lower() == username.lower():
-                profile._obtain_metadata()
-                return profile
+        # for profile in TopSearchResults(context, username).get_profiles():
+        #     if profile.username.lower() == username.lower():
+        #         profile._obtain_metadata()
+        #         return profile
 
-        variables = {
-            "data": {
-                "count":12,
-                "include_reel_media_seen_timestamp": False,
-                "include_relationship_info": True,
-                "latest_besties_reel_media": False,
-                "latest_reel_media": False
-            },
-            "username":username
-        }
+        data = context.doc_id_graphql_query("26347858941511777", {"hasQuery": True, "query": username})["data"]
+        if data:
+            for user in data["xdt_api__v1__fbsearch__non_profiled_serp"]["users"]:
+                if user["username"].lower() == username.lower():
+                    return cls(context, user)
 
-        data = context.doc_id_graphql_query('34579740524958711', variables)
-        try:
-            user_info = data["data"]["xdt_api__v1__feed__user_timeline_graphql_connection"]["edges"][0]["node"]["user"]
-            profile = cls(context, user_info)
-            profile._obtain_metadata()
-            return profile
-        except (KeyError, IndexError):
-            pass
-
-        raise ProfileNotExistsException("No profile found, the user may have blocked you (ID: " +
-                                        str(username) + ").")
+        raise ProfileNotExistsException("Profile {} does not exist.".format(username))
 
     @classmethod
     def from_id(cls, context: InstaloaderContext, profile_id: int):
@@ -958,34 +944,39 @@ class Profile:
         """
         if profile_id in context.profile_id_cache:
             return context.profile_id_cache[profile_id]
-        data = context.graphql_query('7c16654f22c819fb63d1183034a5162f',
-                                     {'user_id': str(profile_id),
-                                      'include_chaining': False,
-                                      'include_reel': True,
-                                      'include_suggested_users': False,
-                                      'include_logged_out_extras': False,
-                                      'include_highlight_reels': False})['data']['user']
+        data = context.graphql_query(
+            '7c16654f22c819fb63d1183034a5162f', {
+                'user_id': str(profile_id),
+                'include_chaining': False,
+                'include_reel': True,
+                'include_suggested_users': False,
+                'include_logged_out_extras': False,
+                'include_highlight_reels': False
+            })['data']['user']
         if data:
             profile = cls(context, data['reel']['owner'])
         else:
-            raise ProfileNotExistsException("No profile found, the user may have blocked you (ID: " +
-                                            str(profile_id) + ").")
+            raise ProfileNotExistsException(
+                "No profile found, the user may have blocked you (ID: " +
+                str(profile_id) + ").")
         context.profile_id_cache[profile_id] = profile
         return profile
 
     @classmethod
-    def from_iphone_struct(cls, context: InstaloaderContext, media: Dict[str, Any]):
+    def from_iphone_struct(cls, context: InstaloaderContext, media: Dict[str,
+                                                                         Any]):
         """Create a profile from a given iphone_struct.
 
         .. versionadded:: 4.9"""
-        return cls(context, {
-            "id": media["pk"],
-            "username": media["username"],
-            "is_private": media["is_private"],
-            "full_name": media["full_name"],
-            "profile_pic_url_hd": media["profile_pic_url"],
-            "iphone_struct": media,
-        })
+        return cls(
+            context, {
+                "id": media["pk"],
+                "username": media["username"],
+                "is_private": media["is_private"],
+                "full_name": media["full_name"],
+                "profile_pic_url_hd": media["profile_pic_url"],
+                "iphone_struct": media,
+            })
 
     @classmethod
     def own_profile(cls, context: InstaloaderContext):
@@ -995,8 +986,12 @@ class Profile:
 
         .. versionadded:: 4.5.2"""
         if not context.is_logged_in:
-            raise LoginRequiredException("Login required to access own profile.")
-        return cls(context, context.graphql_query("d6f4427fbe92d846298cf93df0b937d3", {})["data"]["user"])
+            raise LoginRequiredException(
+                "Login required to access own profile.")
+        return cls(
+            context,
+            context.graphql_query("d6f4427fbe92d846298cf93df0b937d3",
+                                  {})["data"]["user"])
 
     def _asdict(self):
         json_node = self._node.copy()
@@ -1014,57 +1009,83 @@ class Profile:
             if not self._has_full_metadata:
                 user_id = self._node.get('id') or self._node.get('pk')
                 if not user_id:
-                    raise ProfileNotExistsException('Profile {} has no user ID.'.format(self.username))
+                    raise ProfileNotExistsException(
+                        'Profile {} has no user ID.'.format(self.username))
                 variables = {
-                    "id": str(user_id),
-                    "render_surface": "PROFILE",
-                    "__relay_internal__pv__PolarisCannesGuardianExperienceEnabledrelayprovider": True,
-                    "__relay_internal__pv__PolarisCASB976ProfileEnabledrelayprovider": False,
-                    "__relay_internal__pv__PolarisRepostsConsumptionEnabledrelayprovider": False,
-                    "__relay_internal__pv__PolarisWebSchoolsEnabledrelayprovider": False,
-                    "enable_integrity_filters": True,
+                    "id":
+                    str(user_id),
+                    "render_surface":
+                    "PROFILE",
+                    "__relay_internal__pv__PolarisCannesGuardianExperienceEnabledrelayprovider":
+                    True,
+                    "__relay_internal__pv__PolarisCASB976ProfileEnabledrelayprovider":
+                    False,
+                    "__relay_internal__pv__PolarisRepostsConsumptionEnabledrelayprovider":
+                    False,
+                    "__relay_internal__pv__PolarisWebSchoolsEnabledrelayprovider":
+                    False,
+                    "enable_integrity_filters":
+                    True,
                 }
-                data = self._context.doc_id_graphql_query('27937681195819736', variables)
+                data = self._context.doc_id_graphql_query(
+                    '27937681195819736', variables)
                 if data is None:
-                    raise QueryReturnedNotFoundException('GraphQL query returned None')
+                    raise QueryReturnedNotFoundException(
+                        'GraphQL query returned None')
                 user_data = data.get('data', {}).get('user')
                 if user_data is None:
-                    raise ProfileNotExistsException('Profile {} does not exist.'.format(self.username))
+                    raise ProfileNotExistsException(
+                        'Profile {} does not exist.'.format(self.username))
                 self._node = self._normalize_profile_data(user_data)
                 self._has_full_metadata = True
-        except (QueryReturnedNotFoundException, KeyError, ConnectionException) as err:
+        except (QueryReturnedNotFoundException, KeyError,
+                ConnectionException) as err:
             top_search_results = TopSearchResults(self._context, self.username)
-            similar_profiles = [profile.username for profile in top_search_results.get_profiles()]
+            similar_profiles = [
+                profile.username
+                for profile in top_search_results.get_profiles()
+            ]
             if similar_profiles:
                 if self.username in similar_profiles:
                     raise ProfileNotExistsException(
-                        f"Profile {self.username} seems to exist, but could not be loaded.") from err
-                raise ProfileNotExistsException('Profile {} does not exist.\nThe most similar profile{}: {}.'
-                                                .format(self.username,
-                                                        's are' if len(similar_profiles) > 1 else ' is',
-                                                        ', '.join(similar_profiles[0:5]))) from err
-            raise ProfileNotExistsException('Profile {} does not exist.'.format(self.username)) from err
+                        f"Profile {self.username} seems to exist, but could not be loaded."
+                    ) from err
+                raise ProfileNotExistsException(
+                    'Profile {} does not exist.\nThe most similar profile{}: {}.'
+                    .format(self.username,
+                            's are' if len(similar_profiles) > 1 else ' is',
+                            ', '.join(similar_profiles[0:5]))) from err
+            raise ProfileNotExistsException(
+                'Profile {} does not exist.'.format(self.username)) from err
 
-    def _normalize_profile_data(self, user_data: Dict[str, Any]) -> Dict[str, Any]:
+    def _normalize_profile_data(self, user_data: Dict[str,
+                                                      Any]) -> Dict[str, Any]:
         """Normalize PolarisProfilePageContentQuery response to match legacy format."""
         normalized = user_data.copy()
         if 'id' not in normalized and 'pk' in normalized:
             normalized['id'] = normalized['pk']
         if 'edge_owner_to_timeline_media' not in normalized and 'media_count' in normalized:
-            normalized['edge_owner_to_timeline_media'] = {'count': normalized['media_count']}
+            normalized['edge_owner_to_timeline_media'] = {
+                'count': normalized['media_count']
+            }
         if 'edge_felix_video_timeline' not in normalized:
             normalized['edge_felix_video_timeline'] = {'count': 0}
         if 'edge_followed_by' not in normalized and 'follower_count' in normalized:
-            normalized['edge_followed_by'] = {'count': normalized['follower_count']}
+            normalized['edge_followed_by'] = {
+                'count': normalized['follower_count']
+            }
         if 'edge_follow' not in normalized and 'following_count' in normalized:
-            normalized['edge_follow'] = {'count': normalized['following_count']}
+            normalized['edge_follow'] = {
+                'count': normalized['following_count']
+            }
         if 'is_business_account' not in normalized and 'is_business' in normalized:
             normalized['is_business_account'] = normalized['is_business']
         if 'business_category_name' not in normalized and 'category' in normalized:
             normalized['business_category_name'] = normalized['category']
         friendship = normalized.get('friendship_status', {}) or {}
         if 'followed_by_viewer' not in normalized:
-            normalized['followed_by_viewer'] = friendship.get('following', False)
+            normalized['followed_by_viewer'] = friendship.get(
+                'following', False)
         if 'follows_viewer' not in normalized:
             normalized['follows_viewer'] = friendship.get('followed_by', False)
         if 'blocked_by_viewer' not in normalized:
@@ -1072,15 +1093,18 @@ class Profile:
         if 'has_blocked_viewer' not in normalized:
             normalized['has_blocked_viewer'] = False
         if 'has_requested_viewer' not in normalized:
-            normalized['has_requested_viewer'] = friendship.get('incoming_request', False)
+            normalized['has_requested_viewer'] = friendship.get(
+                'incoming_request', False)
         if 'requested_by_viewer' not in normalized:
-            normalized['requested_by_viewer'] = friendship.get('outgoing_request', False)
+            normalized['requested_by_viewer'] = friendship.get(
+                'outgoing_request', False)
         if 'profile_pic_url_hd' not in normalized:
             hd_info = normalized.get('hd_profile_pic_url_info')
             if hd_info and 'url' in hd_info:
                 normalized['profile_pic_url_hd'] = hd_info['url']
             elif 'profile_pic_url' in normalized:
-                normalized['profile_pic_url_hd'] = normalized['profile_pic_url']
+                normalized['profile_pic_url_hd'] = normalized[
+                    'profile_pic_url']
         return normalized
 
     def _metadata(self, *keys) -> Any:
@@ -1101,9 +1125,11 @@ class Profile:
         if not self._context.iphone_support:
             raise IPhoneSupportDisabledException("iPhone support is disabled.")
         if not self._context.is_logged_in:
-            raise LoginRequiredException("Login required to access iPhone profile info endpoint.")
+            raise LoginRequiredException(
+                "Login required to access iPhone profile info endpoint.")
         if not self._iphone_struct_:
-            data = self._context.get_iphone_json(path='api/v1/users/{}/info/'.format(self.userid), params={})
+            data = self._context.get_iphone_json(
+                path='api/v1/users/{}/info/'.format(self.userid), params={})
             self._iphone_struct_ = data['user']
         return self._iphone_struct_
 
@@ -1223,12 +1249,15 @@ class Profile:
         if not self._has_public_story:
             self._obtain_metadata()
             # query rate might be limited:
-            data = self._context.graphql_query('9ca88e465c3f866a76f7adee3871bdd8',
-                                               {'user_id': self.userid, 'include_chaining': False,
-                                                'include_reel': False, 'include_suggested_users': False,
-                                                'include_logged_out_extras': True,
-                                                'include_highlight_reels': False},
-                                               'https://www.instagram.com/{}/'.format(self.username))
+            data = self._context.graphql_query(
+                '9ca88e465c3f866a76f7adee3871bdd8', {
+                    'user_id': self.userid,
+                    'include_chaining': False,
+                    'include_reel': False,
+                    'include_suggested_users': False,
+                    'include_logged_out_extras': True,
+                    'include_highlight_reels': False
+                }, 'https://www.instagram.com/{}/'.format(self.username))
             self._has_public_story = data['data']['user']['has_public_story']
         assert self._has_public_story is not None
         return self._has_public_story
@@ -1268,7 +1297,8 @@ class Profile:
             try:
                 return self._iphone_struct['hd_profile_pic_url_info']['url']
             except (InstaloaderException, KeyError) as err:
-                self._context.error(f"Unable to fetch high quality profile pic: {err}")
+                self._context.error(
+                    f"Unable to fetch high quality profile pic: {err}")
                 return self._metadata("profile_pic_url_hd")
         else:
             return self._metadata("profile_pic_url_hd")
@@ -1295,15 +1325,13 @@ class Profile:
         return NodeIterator(
             context=self._context,
             edge_extractor=(
-                (lambda d: d["data"]["xdt_api__v1__feed__user_timeline_graphql_connection"])
-                if logged_in
-                else (lambda d: d["data"]["user"]["edge_owner_to_timeline_media"])
-            ),
-            node_wrapper=(
-                (lambda n: Post.from_iphone_struct(self._context, n))
-                if logged_in
-                else (lambda n: Post(self._context, n, self))
-            ),
+                (lambda d: d["data"][
+                    "xdt_api__v1__feed__user_timeline_graphql_connection"])
+                if logged_in else
+                (lambda d: d["data"]["user"]["edge_owner_to_timeline_media"])),
+            node_wrapper=((lambda n: Post.from_iphone_struct(self._context, n))
+                          if logged_in else
+                          (lambda n: Post(self._context, n, self))),
             query_variables={
                 "data": {
                     "count": 12,
@@ -1311,13 +1339,19 @@ class Profile:
                     "latest_besties_reel_media": True,
                     "latest_reel_media": True,
                 },
-                **({"username": self.username} if logged_in else {"id": self.userid}),
+                **({
+                    "username": self.username
+                } if logged_in else {
+                       "id": self.userid
+                   }),
             },
-            query_referer="https://www.instagram.com/{0}/".format(self.username),
+            query_referer="https://www.instagram.com/{0}/".format(
+                self.username),
             is_first=Profile._make_is_newest_checker(),
             doc_id="7898261790222653" if logged_in else "7950326061742207",
             query_hash=None,
-            first_data=(None if logged_in else self._metadata("edge_owner_to_timeline_media")),
+            first_data=(None if logged_in else
+                        self._metadata("edge_owner_to_timeline_media")),
         )
 
     def get_saved_posts(self) -> NodeIterator[Post]:
@@ -1326,7 +1360,9 @@ class Profile:
         :rtype: NodeIterator[Post]"""
 
         if self.username != self._context.username:
-            raise LoginRequiredException(f"Login as {self.username} required to get that profile's saved posts.")
+            raise LoginRequiredException(
+                f"Login as {self.username} required to get that profile's saved posts."
+            )
 
         return NodeIterator(
             self._context,
@@ -1348,11 +1384,12 @@ class Profile:
             self._context,
             'e31a871f7301132ceaab56507a66bbb7',
             lambda d: d['data']['user']['edge_user_to_photos_of_you'],
-            lambda n: Post(self._context, n, self if int(n['owner']['id']) == self.userid else None),
+            lambda n: Post(
+                self._context, n, self
+                if int(n['owner']['id']) == self.userid else None),
             {'id': self.userid},
             'https://www.instagram.com/{0}/'.format(self.username),
-            is_first=Profile._make_is_newest_checker()
-        )
+            is_first=Profile._make_is_newest_checker())
 
     def get_reels(self) -> NodeIterator[Post]:
         """Retrieve all reels from a profile.
@@ -1364,18 +1401,26 @@ class Profile:
         """
         self._obtain_metadata()
         return NodeIterator(
-            context = self._context,
-            edge_extractor = lambda d: d['data']['xdt_api__v1__clips__user__connection_v2'],
+            context=self._context,
+            edge_extractor=lambda d: d['data'][
+                'xdt_api__v1__clips__user__connection_v2'],
             # Reels post info is incomplete relative to regular posts so we create a Post from the shortcode
             # and fetch the additional metadata with an additional API request per Reel
-            node_wrapper = lambda n: Post.from_shortcode(context=self._context, shortcode=n["media"]["code"]),
-            query_variables = {'data': {
-                'page_size': 12, 'include_feed_video': True, "target_user_id": str(self.userid)}},
-            query_referer = 'https://www.instagram.com/{0}/'.format(self.username),
-            is_first = Profile._make_is_newest_checker(),
+            node_wrapper=lambda n: Post.from_shortcode(
+                context=self._context, shortcode=n["media"]["code"]),
+            query_variables={
+                'data': {
+                    'page_size': 12,
+                    'include_feed_video': True,
+                    "target_user_id": str(self.userid)
+                }
+            },
+            query_referer='https://www.instagram.com/{0}/'.format(
+                self.username),
+            is_first=Profile._make_is_newest_checker(),
             # fb_api_req_friendly_name=PolarisProfileReelsTabContentQuery_connection
-            doc_id = '7845543455542541',
-            query_hash = None,
+            doc_id='7845543455542541',
+            query_hash=None,
         )
 
     def get_igtv_posts(self) -> NodeIterator[Post]:
@@ -1386,15 +1431,12 @@ class Profile:
         .. versionadded:: 4.3"""
         self._obtain_metadata()
         return NodeIterator(
-            self._context,
-            'bc78b344a68ed16dd5d7f264681c4c76',
+            self._context, 'bc78b344a68ed16dd5d7f264681c4c76',
             lambda d: d['data']['user']['edge_felix_video_timeline'],
-            lambda n: Post(self._context, n, self),
-            {'id': self.userid},
+            lambda n: Post(self._context, n, self), {'id': self.userid},
             'https://www.instagram.com/{0}/channel/'.format(self.username),
             self._metadata('edge_felix_video_timeline'),
-            Profile._make_is_newest_checker()
-        )
+            Profile._make_is_newest_checker())
 
     @staticmethod
     def _make_is_newest_checker() -> Callable[[Post, Optional[Post]], bool]:
@@ -1410,7 +1452,8 @@ class Profile:
         .. versionadded:: 4.10
         """
         if not self._context.is_logged_in:
-            raise LoginRequiredException("Login required to get a profile's followers.")
+            raise LoginRequiredException(
+                "Login required to get a profile's followers.")
         self._obtain_metadata()
         return NodeIterator(
             self._context,
@@ -1429,7 +1472,8 @@ class Profile:
         :rtype: NodeIterator[Profile]
         """
         if not self._context.is_logged_in:
-            raise LoginRequiredException("Login required to get a profile's followers.")
+            raise LoginRequiredException(
+                "Login required to get a profile's followers.")
         self._obtain_metadata()
         return NodeIterator(
             self._context,
@@ -1448,7 +1492,8 @@ class Profile:
         :rtype: NodeIterator[Profile]
         """
         if not self._context.is_logged_in:
-            raise LoginRequiredException("Login required to get a profile's followees.")
+            raise LoginRequiredException(
+                "Login required to get a profile's followees.")
         self._obtain_metadata()
         return NodeIterator(
             self._context,
@@ -1467,13 +1512,17 @@ class Profile:
         .. versionadded:: 4.4
         """
         if not self._context.is_logged_in:
-            raise LoginRequiredException("Login required to get a profile's similar accounts.")
+            raise LoginRequiredException(
+                "Login required to get a profile's similar accounts.")
         self._obtain_metadata()
-        yield from (Profile(self._context, edge["node"]) for edge in
-                    self._context.graphql_query("ad99dd9d3646cc3c0dda65debcd266a7",
-                                                {"user_id": str(self.userid), "include_chaining": True},
-                                                "https://www.instagram.com/{0}/"
-                                                .format(self.username))["data"]["user"]["edge_chaining"]["edges"])
+        yield from (Profile(
+            self._context,
+            edge["node"]) for edge in self._context.graphql_query(
+                "ad99dd9d3646cc3c0dda65debcd266a7", {
+                    "user_id": str(self.userid),
+                    "include_chaining": True
+                }, "https://www.instagram.com/{0}/".format(self.username))
+                    ["data"]["user"]["edge_chaining"]["edges"])
 
 
 class StoryItem:
