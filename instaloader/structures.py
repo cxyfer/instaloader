@@ -262,6 +262,68 @@ class Post:
         return fake_node
 
     @staticmethod
+    def _normalize_post_data(media: Dict[str, Any], context: 'InstaloaderContext') -> Dict[str, Any]:
+        """Normalize the current web media response to the legacy Post field names."""
+        media_types = {1: "GraphImage", 2: "GraphVideo", 8: "GraphSidecar"}
+        media_type = media.get("media_type")
+        typename = media_types.get(media_type)
+        if not typename:
+            raise BadResponseException(f"Unknown media_type in metadata: {media_type}.")
+        pic_json = media.copy()
+        pic_json.update({
+            "shortcode": media["code"],
+            "id": media["pk"],
+            "__typename": typename,
+            "is_video": media_type == 2,
+            "taken_at_timestamp": media["taken_at"],
+            "owner": {
+                "id": media["user"]["pk"],
+                "username": media["user"].get("username", ""),
+                "full_name": media["user"].get("full_name", ""),
+            },
+        })
+        candidates = (media.get("image_versions2") or {}).get("candidates") or []
+        videos = media.get("video_versions") or []
+        pic_json["display_url"] = candidates[0]["url"] if candidates else None
+        pic_json["video_url"] = videos[0]["url"] if videos else None
+        pic_json["video_duration"] = media.get("video_duration")
+        pic_json["video_view_count"] = media.get("view_count")
+        pic_json["video_play_count"] = media.get("play_count")
+        caption = media.get("caption")
+        caption_text = caption.get("text") if isinstance(caption, dict) else None
+        pic_json["edge_media_to_caption"] = {
+            "edges": [{"node": {"text": caption_text}}] if caption_text is not None else []
+        }
+        pic_json["edge_media_preview_like"] = {"count": media.get("like_count") or 0}
+        pic_json["edge_media_to_parent_comment"] = {"count": media.get("comment_count") or 0, "edges": []}
+        if media.get("has_liked") is not None:
+            pic_json["viewer_has_liked"] = media["has_liked"]
+        carousel = media.get("carousel_media") or []
+        if carousel:
+            children = []
+            for item in carousel:
+                item_type = item.get("media_type", 1)
+                item_candidates = (item.get("image_versions2") or {}).get("candidates") or []
+                item_videos = item.get("video_versions") or []
+                children.append({"node": {
+                    "shortcode": item.get("code", ""),
+                    "__typename": media_types.get(item_type, "GraphImage"),
+                    "is_video": item_type == 2,
+                    "display_url": item_candidates[0]["url"] if item_candidates else "",
+                    "video_url": item_videos[0]["url"] if item_videos else None,
+                    **({"accessibility_caption": item["accessibility_caption"]}
+                       if item.get("accessibility_caption") is not None else {}),
+                }})
+            pic_json["edge_sidecar_to_children"] = {"edges": children}
+        tagged = (media.get("usertags") or {}).get("in") or []
+        if tagged:
+            pic_json["edge_media_to_tagged_user"] = {"edges": [
+                {"node": {"user": {"username": t["user"]["username"].lower()}}}
+                for t in tagged if (t.get("user") or {}).get("username")
+            ]}
+        return pic_json
+
+    @staticmethod
     def shortcode_to_mediaid(code: str) -> int:
         if len(code) > 11:
             raise InvalidArgumentException("Wrong shortcode \"{0}\", unable to convert to mediaid.".format(code))
@@ -322,23 +384,16 @@ class Post:
 
     def _obtain_metadata(self):
         if not self._full_metadata_dict:
-            pic_json = self._context.doc_id_graphql_query(
-                "8845758582119845", {"shortcode": self.shortcode}
-            )["data"]["xdt_shortcode_media"]
-            if pic_json is None:
+            resp = self._context.doc_id_graphql_query(
+                "27128499623469141",
+                {"shortcode": self.shortcode,
+                 "__relay_internal__pv__PolarisAIGMMediaWebLabelEnabledrelayprovider": False},
+            )
+            items = ((resp.get("data") or {}).get(
+                "xdt_api__v1__media__shortcode__web_info") or {}).get("items")
+            if not items:
                 raise BadResponseException("Fetching Post metadata failed.")
-            try:
-                xdt_types = {
-                    "XDTGraphImage": "GraphImage",
-                    "XDTGraphVideo": "GraphVideo",
-                    "XDTGraphSidecar": "GraphSidecar",
-                }
-                pic_json["__typename"] = xdt_types[pic_json["__typename"]]
-            except KeyError as exc:
-                raise BadResponseException(
-                    f"Unknown __typename in metadata: {pic_json['__typename']}."
-                ) from exc
-            self._full_metadata_dict = pic_json
+            self._full_metadata_dict = Post._normalize_post_data(items[0], self._context)
             if self.shortcode != self._full_metadata_dict['shortcode']:
                 self._node.update(self._full_metadata_dict)
                 raise PostChangedException
@@ -1322,16 +1377,20 @@ class Profile:
         :rtype: NodeIterator[Post]"""
         self._obtain_metadata()
         logged_in = self._context.is_logged_in
+        if logged_in:
+            return NodeIterator(
+                context=self._context,
+                query_hash=None,
+                edge_extractor=lambda d: d,
+                node_wrapper=lambda n: Post.from_iphone_struct(self._context, n),
+                query_referer="https://www.instagram.com/{0}/".format(self.username),
+                is_first=Profile._make_is_newest_checker(),
+                profile_feed_id=self.userid,
+            )
         return NodeIterator(
             context=self._context,
-            edge_extractor=(
-                (lambda d: d["data"][
-                    "xdt_api__v1__feed__user_timeline_graphql_connection"])
-                if logged_in else
-                (lambda d: d["data"]["user"]["edge_owner_to_timeline_media"])),
-            node_wrapper=((lambda n: Post.from_iphone_struct(self._context, n))
-                          if logged_in else
-                          (lambda n: Post(self._context, n, self))),
+            edge_extractor=lambda d: d["data"]["user"]["edge_owner_to_timeline_media"],
+            node_wrapper=lambda n: Post(self._context, n, self),
             query_variables={
                 "data": {
                     "count": 12,
@@ -1339,19 +1398,14 @@ class Profile:
                     "latest_besties_reel_media": True,
                     "latest_reel_media": True,
                 },
-                **({
-                    "username": self.username
-                } if logged_in else {
-                       "id": self.userid
-                   }),
+                "id": self.userid,
             },
             query_referer="https://www.instagram.com/{0}/".format(
                 self.username),
             is_first=Profile._make_is_newest_checker(),
-            doc_id="7898261790222653" if logged_in else "7950326061742207",
+            doc_id="7950326061742207",
             query_hash=None,
-            first_data=(None if logged_in else
-                        self._metadata("edge_owner_to_timeline_media")),
+            first_data=self._metadata("edge_owner_to_timeline_media"),
         )
 
     def get_saved_posts(self) -> NodeIterator[Post]:

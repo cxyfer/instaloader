@@ -191,7 +191,8 @@ class InstaloaderContext:
                   'Referer': 'https://www.instagram.com/',
                   'User-Agent': self.user_agent,
                   'X-Instagram-AJAX': '1',
-                  'X-Requested-With': 'XMLHttpRequest'}
+                  'X-Requested-With': 'XMLHttpRequest',
+                  'x-ig-app-id': '936619743392459'}
         if empty_session_only:
             del header['Host']
             del header['Origin']
@@ -490,7 +491,7 @@ class InstaloaderContext:
                     if is_other_query:
                         self._rate_controller.handle_429('other')
                 return self.get_json(path=path, params=params, host=host, session=sess, _attempt=_attempt + 1,
-                                     response_headers=response_headers)
+                                     response_headers=response_headers, use_post=use_post)
             except KeyboardInterrupt:
                 self.error("[skipped by user]", repeat_at_end=False)
                 raise ConnectionException(error_string) from err
@@ -540,6 +541,13 @@ class InstaloaderContext:
         :param referer: HTTP Referer, or None.
         :return: The server's response dictionary.
         """
+        csrf = next((c.value for c in self._session.cookies
+                     if c.name == 'csrftoken' and c.value), None)
+        if not csrf:
+            self._session.get('https://www.instagram.com/', timeout=self.request_timeout)
+            csrf = next((c.value for c in self._session.cookies
+                         if c.name == 'csrftoken' and c.value), '')
+
         with copy_session(self._session, self.request_timeout) as tmpsession:
             tmpsession.headers.update(self._default_http_header(empty_session_only=True))
             del tmpsession.headers['Connection']
@@ -547,6 +555,7 @@ class InstaloaderContext:
             tmpsession.headers['authority'] = 'www.instagram.com'
             tmpsession.headers['scheme'] = 'https'
             tmpsession.headers['accept'] = '*/*'
+            tmpsession.headers['x-csrftoken'] = csrf
             if referer is not None:
                 tmpsession.headers['referer'] = urllib.parse.quote(referer)
 
@@ -661,6 +670,17 @@ class InstaloaderContext:
                     self.iphone_headers[key.replace('x-ig-set-', 'x-ig-')] = value
 
             return response
+
+    def get_profile_posts(self, profile_id: int, max_id: Optional[str] = None) -> Dict[str, Any]:
+        """Retrieve a profile's posts through the authenticated iPhone feed API."""
+        params: Dict[str, Any] = {
+            "count": "12",
+            "include_suggested_users": "false",
+            "exclude_pinned_posts": "false",
+        }
+        if max_id:
+            params["max_id"] = max_id
+        return self.get_iphone_json(f"api/v1/feed/user/{profile_id}/", params)
 
     def write_raw(self, resp: Union[bytes, requests.Response], filename: str) -> None:
         """Write raw response data into a file.
