@@ -671,17 +671,6 @@ class InstaloaderContext:
 
             return response
 
-    def get_profile_posts(self, profile_id: int, max_id: Optional[str] = None) -> Dict[str, Any]:
-        """Retrieve a profile's posts through the authenticated iPhone feed API."""
-        params: Dict[str, Any] = {
-            "count": "12",
-            "include_suggested_users": "false",
-            "exclude_pinned_posts": "false",
-        }
-        if max_id:
-            params["max_id"] = max_id
-        return self.get_iphone_json(f"api/v1/feed/user/{profile_id}/", params)
-
     def write_raw(self, resp: Union[bytes, requests.Response], filename: str) -> None:
         """Write raw response data into a file.
 

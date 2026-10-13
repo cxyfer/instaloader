@@ -7,7 +7,7 @@ from datetime import datetime, timedelta
 from lzma import LZMAError
 from typing import Any, Callable, Dict, Iterable, Iterator, NamedTuple, Optional, Tuple, TypeVar
 
-from .exceptions import BadResponseException, InvalidArgumentException
+from .exceptions import InvalidArgumentException
 from .instaloadercontext import InstaloaderContext
 
 class FrozenNodeIterator(NamedTuple):
@@ -83,17 +83,13 @@ class NodeIterator(Iterator[T]):
                  query_referer: Optional[str] = None,
                  first_data: Optional[Dict[str, Any]] = None,
                  is_first: Optional[Callable[[T, Optional[T]], bool]] = None,
-                 doc_id: Optional[str] = None,
-                 profile_feed_id: Optional[int] = None):
+                 doc_id: Optional[str] = None):
         self._context = context
         self._query_hash = query_hash
         self._doc_id = doc_id
-        self._profile_feed_id = profile_feed_id
         self._edge_extractor = edge_extractor
         self._node_wrapper = node_wrapper
         self._query_variables = query_variables if query_variables is not None else {}
-        if profile_feed_id is not None:
-            self._query_variables = {**self._query_variables, "_profile_feed_id": profile_feed_id}
         self._query_referer = query_referer
         self._page_index = 0
         self._total_index = 0
@@ -106,18 +102,6 @@ class NodeIterator(Iterator[T]):
         self._is_first = is_first
 
     def _query(self, after: Optional[str] = None) -> Dict:
-        if self._profile_feed_id is not None:
-            data = self._context.get_profile_posts(self._profile_feed_id, after)
-            if not isinstance(data.get('items'), list):
-                raise BadResponseException("Profile feed response is missing its items list.")
-            self._best_before = datetime.now() + NodeIterator._shelf_life
-            return {
-                'edges': [{'node': item} for item in data['items']],
-                'page_info': {
-                    'has_next_page': bool(data.get('more_available') and data.get('next_max_id')),
-                    'end_cursor': data.get('next_max_id'),
-                },
-            }
         if self._doc_id is not None:
             return self._query_doc_id(self._doc_id, after)
         else:

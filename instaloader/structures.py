@@ -1378,14 +1378,45 @@ class Profile:
         self._obtain_metadata()
         logged_in = self._context.is_logged_in
         if logged_in:
+            def extract_posts(response: Dict[str, Any]) -> Dict[str, Any]:
+                connection = (response.get("data") or {}).get(
+                    "xdt_api__v1__feed__user_timeline_graphql_connection")
+                if (not isinstance(connection, dict) or
+                        not isinstance(connection.get("edges"), list) or
+                        not isinstance(connection.get("page_info"), dict)):
+                    raise BadResponseException("Profile posts response is missing its connection data.")
+                return connection
+
+            query_variables = {
+                "username": self.username,
+                "data": {
+                    "count": 12,
+                    "include_relationship_info": True,
+                    "latest_besties_reel_media": True,
+                    "latest_reel_media": True,
+                },
+                "first": 12,
+                "after": None,
+                "before": None,
+                "last": None,
+                "include_multi_captions": False,
+                "__relay_internal__pv__PolarisMultiCaptionCarouselEnabledrelayprovider": False,
+                "__relay_internal__pv__PolarisShortDramaEnabledrelayprovider": False,
+                "__relay_internal__pv__PolarisReelsRecoDebugOverlayEnabledrelayprovider": False,
+            }
+            query_referer = "https://www.instagram.com/{0}/".format(self.username)
+            first_data = extract_posts(self._context.doc_id_graphql_query(
+                "28542612348729311", query_variables, query_referer))
             return NodeIterator(
                 context=self._context,
                 query_hash=None,
-                edge_extractor=lambda d: d,
+                edge_extractor=extract_posts,
                 node_wrapper=lambda n: Post.from_iphone_struct(self._context, n),
-                query_referer="https://www.instagram.com/{0}/".format(self.username),
+                query_variables=query_variables,
+                query_referer=query_referer,
                 is_first=Profile._make_is_newest_checker(),
-                profile_feed_id=self.userid,
+                doc_id="28142289515441884",
+                first_data=first_data,
             )
         return NodeIterator(
             context=self._context,
